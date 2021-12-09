@@ -1,16 +1,17 @@
 extern crate execute;
 extern crate fs_extra;
 
-use fs_extra::dir::{CopyOptions, move_dir};
+use fs_extra::dir::{move_dir};
 
 use std::process::{Command, Stdio};
 use execute::{Execute, command as c};
 
 use clap::{AppSettings, Parser};
-use std::fs::{create_dir, OpenOptions};
+use std::fs::{OpenOptions};
 use std::env::{current_dir, set_current_dir};
 use std::io::Write;
 use std::ops::Add;
+use fs_extra::file::move_file;
 
 
 #[derive(Parser, Debug)]
@@ -62,13 +63,9 @@ fn main() -> std::io::Result<()> {
     let original_wk_directory: String = format!("{}", current_dir()?.display());
 
 
-    let wk_directory = if args.in_place{
-        format!("{}/temp_{}", current_dir()?.display(), name)
-    } else {
-        format!("{}/{}", current_dir()?.display(), name)
-    };
+    let wk_directory = format!("{}/{}", current_dir()?.display(), name);
 
-    fs_extra::dir::create(wk_directory.clone(), false).expect("Failed to create directory");
+    fs_extra::dir::create(name, args.in_place).expect("Failed to create directory");
 
 
     set_current_dir(wk_directory.clone()).expect("Failed to set working directory");
@@ -104,8 +101,6 @@ fn main() -> std::io::Result<()> {
         eprintln!("Interrupted!");
     }
 
-
-
     for folder in args.folders {
         write_contents_to(format!("{}/.git/info/sparse-checkout", wk_directory.clone()).as_str(), folder.add("\n").as_bytes())?
     }
@@ -119,16 +114,17 @@ fn main() -> std::io::Result<()> {
     }
 
     if args.in_place {
-        let options = CopyOptions::new();
+        let options_dir = fs_extra::dir::CopyOptions::new();
+        let options_file = fs_extra::file::CopyOptions::new();
 
         for entry in std::fs::read_dir(".")? {
             let e =  entry.expect("Failed to read dir files");
             if e.file_name() == ".git" { continue };
 
-            if e.file_type().is_ok() &&  e.file_type().unwrap().is_dir() {
-                move_dir(e.path(), original_wk_directory.clone(), &options).expect("Failed to copy dir");
+            if e.file_type().unwrap().is_dir() {
+                move_dir(e.path(), original_wk_directory.clone(), &options_dir).expect("Failed to copy dir");
             } else {
-                std::fs::copy(e.path(), original_wk_directory.clone())?;
+                move_file(e.path(), format!("{}/{}", original_wk_directory.clone(), e.file_name().into_string().unwrap()), &options_file).expect("Failed to copy dir");
             }
 
         }
