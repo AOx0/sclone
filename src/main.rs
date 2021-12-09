@@ -6,15 +6,17 @@ use fs_extra::dir::move_dir;
 use execute::{command as c, Execute};
 use std::process::{Command, Stdio};
 
-use clap::{AppSettings, Parser};
+use clap::{Parser, ColorChoice};
 use fs_extra::file::move_file;
 use std::env::{current_dir, set_current_dir};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::ops::Add;
 
+
+
 #[derive(Parser, Debug)]
-#[clap(about, version, author, setting = AppSettings::DisableColoredHelp)]
+#[clap(about, version, author, color(ColorChoice::Never))]
 struct Args {
     //Url of the github repository
     #[clap(required = true)]
@@ -46,6 +48,8 @@ pub fn write_contents_to(path: &str, contents: &[u8]) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
+
+
     let args = Args::parse();
 
     let name: String = args.url.clone();
