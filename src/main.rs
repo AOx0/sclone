@@ -107,9 +107,24 @@ fn main() -> std::io::Result<()> {
 
     let mut command = c(format!("git pull origin {}", args.branch));
 
+
+
     if let Some(exit_code) = command.execute().unwrap() {
-        if !(exit_code == 0) { eprintln!("Failed to get folders from repo"); }
+        if !(exit_code == 0) && args.branch == "main" {
+            let mut command = c(format!("git pull origin master"));
+            if let Some(exit_code) = command.execute().unwrap() {
+                if !(exit_code == 0) && args.branch == "main" {
+                    eprintln!("Failed to get folders from repo");
+                }
+            } else {
+
+                eprintln!("Interrupted!");
+            }
+
+
+        }
     } else {
+
         eprintln!("Interrupted!");
     }
 

@@ -11,3 +11,7 @@ Clone only tree folders Assets and Packages from `https://github.com/AOx0/Digita
 ```
 sclone https://github.com/AOx0/Digital-Logic-Sim Assets Packages
 ```
+
+
+
+P.S: I'm aware the code is absolutely horrifying. I'll work on it
