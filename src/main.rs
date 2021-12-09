@@ -14,7 +14,6 @@ use std::io::Write;
 use std::ops::Add;
 
 
-
 #[derive(Parser, Debug)]
 #[clap(about, version, author, color(ColorChoice::Never))]
 struct Args {
