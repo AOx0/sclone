@@ -4,15 +4,14 @@ extern crate fs_extra;
 use fs_extra::dir::move_dir;
 
 use execute::{command as c, Execute};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
-use clap::{Parser, ColorChoice};
+use clap::{ColorChoice, Parser};
 use fs_extra::file::move_file;
 use std::env::{current_dir, set_current_dir};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::ops::Add;
-
 
 #[derive(Parser, Debug)]
 #[clap(about, version, author, color(ColorChoice::Never))]
@@ -46,14 +45,31 @@ pub fn write_contents_to(path: &str, contents: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+trait Handle {
+    fn handle(&mut self, on_error: &str) -> bool;
+}
+
+impl Handle for Command {
+    fn handle(&mut self, on_error: &str) -> bool {
+        if let Some(exit_code) = self.execute().unwrap() {
+            if !(exit_code == 0) {
+                eprintln!("{}", on_error);
+                return false;
+            }
+        } else {
+            eprintln!("Interrupted!");
+            return false;
+        }
+
+        return true;
+    }
+}
+
 fn main() -> std::io::Result<()> {
-
-
     let args = Args::parse();
 
     let name: String = args.url.clone();
     let name = name.split("/").collect::<Vec<&str>>()[4];
-
     let name = if args.in_place {
         format!("temp_{}", name)
     } else {
@@ -61,51 +77,19 @@ fn main() -> std::io::Result<()> {
     };
 
     let original_wk_directory: String = format!("{}", current_dir()?.display());
-
     let wk_directory = format!("{}/{}", current_dir()?.display(), name);
 
     fs_extra::dir::create(name, args.in_place).expect("Failed to create directory");
-
     set_current_dir(wk_directory.clone()).expect("Failed to set working directory");
 
-    let mut command = Command::new("git");
-    command.arg("init");
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-
-    let output = command.execute_output().unwrap();
-
-    if let Some(exit_code) = output.status.code() {
-        if !(exit_code == 0
-            && String::from_utf8(output.stdout)
-                .expect("Failed to get git init output")
-                .contains("Initialized empty Git repository in"))
-        {
-            eprintln!("Failed to initialize empty github repo");
-        }
-    } else {
-        eprintln!("Interrupted!");
-    }
+    let mut command = c("git init");
+    command.handle("Failed to initialize empty github repo");
 
     let mut command = c(format!("git remote add -f origin {}", args.url));
-
-    if let Some(exit_code) = command.execute().unwrap() {
-        if !(exit_code == 0) {
-            eprintln!("Failed to add remote repo url");
-        }
-    } else {
-        eprintln!("Interrupted!");
-    }
+    command.handle("Failed to add remote repo url");
 
     let mut command = c("git config core.sparseCheckout true");
-
-    if let Some(exit_code) = command.execute().unwrap() {
-        if !(exit_code == 0) {
-            eprintln!("Failed to write to .git/config");
-        }
-    } else {
-        eprintln!("Interrupted!");
-    }
+    command.handle("Failed to write to .git/config");
 
     for folder in args.folders {
         write_contents_to(
@@ -115,20 +99,9 @@ fn main() -> std::io::Result<()> {
     }
 
     let mut command = c(format!("git pull origin {}", args.branch));
-
-    if let Some(exit_code) = command.execute().unwrap() {
-        if !(exit_code == 0) && args.branch == "main" {
-            let mut command = c(format!("git pull origin master"));
-            if let Some(exit_code) = command.execute().unwrap() {
-                if !(exit_code == 0) && args.branch == "main" {
-                    eprintln!("Failed to get folders from repo. Check the branch name is correct.");
-                }
-            } else {
-                eprintln!("Interrupted!");
-            }
-        }
-    } else {
-        eprintln!("Interrupted!");
+    if command.handle("") == false {
+        let mut command = c(format!("git pull origin master"));
+        command.handle("Failed to get folders from repo. Check the branch name is correct.");
     }
 
     if args.in_place {
