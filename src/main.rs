@@ -6,9 +6,8 @@ use lazy_static::*;
 use fs_extra::dir::move_dir;
 
 use execute::{command as c, Execute};
-use std::process::{Command, exit, Stdio};
+use std::process::{exit, Command, Stdio};
 use std::sync::Mutex;
-
 
 use clap::{ColorChoice, Parser};
 use fs_extra::file::move_file;
@@ -18,26 +17,46 @@ use std::io;
 use std::io::Write;
 use std::ops::Add;
 
-
 lazy_static! {
     static ref VERBOSE: Mutex<bool> = Mutex::from(false);
     static ref ERRORS: Mutex<bool> = Mutex::from(false);
-    static ref NAME:  Mutex<String> = Mutex::new(String::new());
+    static ref NAME: Mutex<String> = Mutex::new(String::new());
+}
+
+
+macro_rules! printf {
+    ( $($t:tt)* ) => {
+        {
+            let mut h = std::io::stdout();
+            write!(h, $($t)* ).unwrap();
+            h.flush().unwrap();
+        }
+    }
+}
+
+macro_rules! e_printf {
+    ( $($t:tt)* ) => {
+        {
+            let mut h = std::io::stderr();
+            write!(h, $($t)* ).unwrap();
+            h.flush().unwrap();
+        }
+    }
 }
 
 macro_rules! v {
-    ($msg: expr) => {
-        let _ = io::stdout().flush();
-        if *VERBOSE.lock().unwrap() {  print!("{}", $msg) }
-        let _ = io::stdout().flush();
+    ( $($t:tt)*) => {
+        if *VERBOSE.lock().unwrap() {
+            printf!($($t)*);
+        }
     };
 }
 
 macro_rules! ev {
-    ($msg: expr) => {
-        let _ = io::stdout().flush();
-        if *ERRORS.lock().unwrap() {  eprint!("{}", $msg) }
-        let _ = io::stdout().flush();
+    ( $($t:tt)*) => {
+        if *ERRORS.lock().unwrap() {
+            e_printf!($($t)*);
+        }
     };
 }
 
@@ -70,7 +89,12 @@ struct Args {
 }
 
 pub fn write_contents_to(path: &str, contents: &[u8]) -> std::io::Result<()> {
-    let mut file = OpenOptions::new().read(true).write(true).create(true).append(true).open(path)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(path)?;
     file.write(contents)?;
     Ok(())
 }
@@ -90,9 +114,9 @@ impl Handle for Command {
         if let Some(exit_code) = output.status.code() {
             if !(exit_code == 0) {
                 let _ = io::stdout().flush();
-                eprint!("{}", on_error);
-                ev!(format!("{}\n", String::from_utf8(output.stdout).unwrap()));
-                ev!(format!("{}\n", String::from_utf8(output.stderr).unwrap()));
+                e_printf!("{}", on_error);
+                ev!("{}\n", String::from_utf8(output.stdout).unwrap());
+                ev!("{}\n", String::from_utf8(output.stderr).unwrap());
                 return false;
             }
         }
@@ -101,8 +125,13 @@ impl Handle for Command {
 
     fn handle_or_exit(&mut self, on_error: &str) {
         if self.handle(on_error) == false {
-            fs_extra::dir::remove(&*NAME.lock().unwrap()).expect("Failed to remove dir");
-            print!("\n");
+            e_printf!("Execution failed. Removing created files...\n");
+            if let Err(err) = fs_extra::dir::remove(&*NAME.lock().unwrap()) {
+                e_printf!("Failed to remove directory.\n");
+                ev!("Error: {}", err);
+                exit(1);
+            }
+            printf!("\n");
             exit(1);
         }
     }
@@ -114,47 +143,59 @@ fn main() {
     *VERBOSE.lock().unwrap() = args.verbose;
     *ERRORS.lock().unwrap() = args.errors;
 
-
-
     v!("Reading arguments...\n");
     let name: String = args.url.clone();
 
-    if args.verbose { println!("{:?}", args) }
+    if args.verbose {
+        println!("{:?}", args)
+    }
 
     v!("Generating name...");
     let name = name.split("/").collect::<Vec<&str>>()[4];
-    let name = if args.in_place { format!("temp_{}", name) } else { name.to_string() };
-    v!( format!("{}\n", name) );
+    let name = if args.in_place {
+        format!("temp_{}", name)
+    } else {
+        name.to_string()
+    };
+    v!("{}\n", name);
 
     *NAME.lock().unwrap() = name.clone();
 
-    let c_dir  = current_dir();
+    let c_dir = current_dir();
     let c_dir = match c_dir {
         Ok(dir) => dir,
         Err(err) => {
-            eprint!("Failed to get current directory.\n{}\n", err);
+            e_printf!("Failed to get current directory.\n");
+            ev!("Error: {}\n", err);
             exit(1);
         }
     };
 
-
-
-
     let original_wk_directory: String = format!("{}", c_dir.display());
     let wk_directory = format!("{}/{}", c_dir.display(), name);
 
+    v!("Creating folder '{}'...\n", wk_directory);
+    if let Err(err) = fs_extra::dir::create(name, args.in_place){
+        e_printf!("Failed to create directory\n");
+        ev!("Error: {}\n", err);
+        exit(1);
+    }
 
-    v!( format!("Creating folder '{}'...\n", wk_directory) );
-    fs_extra::dir::create(name, args.in_place).expect("Failed to create directory");
-
-    v!( format!("Switching from {} to {}...\n", original_wk_directory, wk_directory) );
-    set_current_dir(wk_directory.clone()).expect("Failed to set working directory");
+    v!(
+        "Switching from {} to {}...\n",
+        original_wk_directory, wk_directory
+    );
+    if let Err(err) = set_current_dir(wk_directory.clone()) {
+        e_printf!("Failed to set working directory\n");
+        ev!("Error: {}\n", err);
+        exit(1);
+    }
 
     v!("Running git init...\n");
     let mut command = c("git init");
     command.handle_or_exit("Failed to initialize empty github repo");
 
-    v!( format!("Adding remote origin with url '{}'\n", args.url) );
+    v!("Adding remote origin with url '{}'\n", args.url);
     let mut command = c(format!("git remote add -f origin {}", args.url));
     command.handle_or_exit("Failed to add remote repo url");
 
@@ -164,43 +205,56 @@ fn main() {
 
     v!("Writing files to checkout...\n");
     for folder in args.folders {
-        v!( format!("    - {}\n", folder) );
-        if let Err(e) =  write_contents_to(
+        v!("    - {}\n", folder);
+        if let Err(e) = write_contents_to(
             format!("{}/.git/info/sparse-checkout", wk_directory.clone()).as_str(),
             folder.add("\n").as_bytes(),
         ) {
-            eprint!("Error: {}\n", e);
+            e_printf!("Error: {}\n", e);
             exit(1);
         }
     }
 
-    v!( format!("Pulling from branch {}... ",  args.branch) );
+    v!("Pulling from branch {}... ", args.branch);
     let mut command = c(format!("git pull origin {}", args.branch));
-    let to_try = if args.branch == "main" { "master" } else { "main" };
-    let error_msg = if args.branch == "main" ||args.branch == "master" {
-        format!("\nFailed to get {}. Trying with {}... ", args.branch, to_try)
+    let to_try = if args.branch == "main" {
+        "master"
+    } else {
+        "main"
+    };
+    let error_msg = if args.branch == "main" || args.branch == "master" {
+        format!(
+            "\nFailed to get {}. Trying with {}... ",
+            args.branch, to_try
+        )
     } else {
         format!("Failed to pull from branch. Is the branch name correct?")
     };
     if command.handle(&error_msg) == false && (args.branch == "main" || args.branch == "master") {
         let mut command = c(format!("git pull origin {}", to_try));
-        command.handle_or_exit("Failed to get folders from repo. Check the branch name is correct.");
+        command
+            .handle_or_exit("Failed to get folders from repo. Check the branch name is correct.");
+        printf!("Success!\n");
+    } else {
+        v!("Success!\n");
     }
 
-    v!("Success!\n");
+
+
 
     if args.in_place {
+        v!("Copying files to current directory {}...\n", original_wk_directory);
         let options_dir = fs_extra::dir::CopyOptions::new();
         let options_file = fs_extra::file::CopyOptions::new();
 
         let files = match std::fs::read_dir(".") {
             Ok(c) => c,
             Err(err) => {
-                eprintln!("{}", err);
+                e_printf!("Failed to read directory contents.\n");
+                ev!("Error: {}", err);
                 exit(1);
             }
         };
-
 
         for entry in files {
             let e = entry.expect("Failed to read dir files");
@@ -209,10 +263,13 @@ fn main() {
             };
 
             if e.file_type().unwrap().is_dir() {
-                move_dir(e.path(), original_wk_directory.clone(), &options_dir)
-                    .expect("Failed to copy dir");
+                if let Err(err) = move_dir(e.path(), original_wk_directory.clone(), &options_dir) {
+                    e_printf!("Failed to move directory\n");
+                    ev!("Error: {}\n", err);
+                    exit(1);
+                }
             } else {
-                move_file(
+                if let Err(err) = move_file(
                     e.path(),
                     format!(
                         "{}/{}",
@@ -220,10 +277,18 @@ fn main() {
                         e.file_name().into_string().unwrap()
                     ),
                     &options_file,
-                )
-                .expect("Failed to copy dir");
+                ) {
+                    e_printf!("Failed to move directory\n");
+                    ev!("Error: {}\n", err);
+                    exit(1);
+                }
+
             }
         }
-        fs_extra::dir::remove(wk_directory.clone()).expect("Failed to remove dir");
+        if let Err(err) = fs_extra::dir::remove(wk_directory.clone()) {
+            e_printf!("Failed to remove directory\n");
+            ev!("Error: {}\n", err);
+            exit(1);
+        }
     }
 }
