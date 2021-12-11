@@ -13,7 +13,6 @@ use clap::{ColorChoice, Parser};
 use fs_extra::file::move_file;
 use std::env::{current_dir, set_current_dir};
 use std::fs::OpenOptions;
-use std::io;
 use std::io::Write;
 use std::ops::Add;
 
@@ -22,7 +21,6 @@ lazy_static! {
     static ref ERRORS: Mutex<bool> = Mutex::from(false);
     static ref NAME: Mutex<String> = Mutex::new(String::new());
 }
-
 
 macro_rules! printf {
     ( $($t:tt)* ) => {
@@ -113,7 +111,6 @@ impl Handle for Command {
 
         if let Some(exit_code) = output.status.code() {
             if !(exit_code == 0) {
-                let _ = io::stdout().flush();
                 e_printf!("{}", on_error);
                 ev!("{}\n", String::from_utf8(output.stdout).unwrap());
                 ev!("{}\n", String::from_utf8(output.stderr).unwrap());
@@ -125,16 +122,21 @@ impl Handle for Command {
 
     fn handle_or_exit(&mut self, on_error: &str) {
         if self.handle(on_error) == false {
-            e_printf!("Execution failed. Removing created files...\n");
-            if let Err(err) = fs_extra::dir::remove(&*NAME.lock().unwrap()) {
-                e_printf!("Failed to remove directory.\n");
-                ev!("Error: {}", err);
-                exit(1);
-            }
-            printf!("\n");
-            exit(1);
+
+            e_exit();
         }
     }
+}
+
+fn e_exit() {
+    e_printf!("Execution failed. Removing created files...\n");
+    v!("Removing: {}\n", &*NAME.lock().unwrap());
+    if let Err(err) = fs_extra::dir::remove(&*NAME.lock().unwrap()) {
+        e_printf!("Failed to remove directory.\n");
+        ev!("Error: {}", err);
+        exit(1);
+    }
+    exit(1);
 }
 
 fn main() {
@@ -159,36 +161,38 @@ fn main() {
     };
     v!("{}\n", name);
 
-    *NAME.lock().unwrap() = name.clone();
+
 
     let c_dir = current_dir();
-    let c_dir = match c_dir {
-        Ok(dir) => dir,
-        Err(err) => {
-            e_printf!("Failed to get current directory.\n");
-            ev!("Error: {}\n", err);
-            exit(1);
-        }
-    };
+    if let Err(err) =  c_dir  {
+        e_printf!("Failed to get current directory.\n");
+        ev!("Error: {}\n", err);
+        e_exit()
+    }
+
+    let c_dir = current_dir().expect("Unexpected exception");
 
     let original_wk_directory: String = format!("{}", c_dir.display());
     let wk_directory = format!("{}/{}", c_dir.display(), name);
 
+    *NAME.lock().unwrap() = wk_directory.clone();
+
     v!("Creating folder '{}'...\n", wk_directory);
-    if let Err(err) = fs_extra::dir::create(name, args.in_place){
+    if let Err(err) = fs_extra::dir::create(name, args.in_place) {
         e_printf!("Failed to create directory\n");
         ev!("Error: {}\n", err);
-        exit(1);
+        e_exit();
     }
 
     v!(
         "Switching from {} to {}...\n",
-        original_wk_directory, wk_directory
+        original_wk_directory,
+        wk_directory
     );
     if let Err(err) = set_current_dir(wk_directory.clone()) {
         e_printf!("Failed to set working directory\n");
         ev!("Error: {}\n", err);
-        exit(1);
+        e_exit();
     }
 
     v!("Running git init...\n");
@@ -211,7 +215,7 @@ fn main() {
             folder.add("\n").as_bytes(),
         ) {
             e_printf!("Error: {}\n", e);
-            exit(1);
+            e_exit();
         }
     }
 
@@ -239,22 +243,21 @@ fn main() {
         v!("Success!\n");
     }
 
-
-
-
     if args.in_place {
-        v!("Copying files to current directory {}...\n", original_wk_directory);
+        v!(
+            "Copying files to current directory {}...\n",
+            original_wk_directory
+        );
         let options_dir = fs_extra::dir::CopyOptions::new();
         let options_file = fs_extra::file::CopyOptions::new();
 
-        let files = match std::fs::read_dir(".") {
-            Ok(c) => c,
-            Err(err) => {
-                e_printf!("Failed to read directory contents.\n");
-                ev!("Error: {}", err);
-                exit(1);
-            }
+        if let Err(err) = std::fs::read_dir(".") {
+            e_printf!("Failed to read directory contents.\n");
+            ev!("Error: {}", err);
+            e_exit();
         };
+
+        let files = std::fs::read_dir(".").expect("Unexpected error");
 
         for entry in files {
             let e = entry.expect("Failed to read dir files");
@@ -266,7 +269,7 @@ fn main() {
                 if let Err(err) = move_dir(e.path(), original_wk_directory.clone(), &options_dir) {
                     e_printf!("Failed to move directory\n");
                     ev!("Error: {}\n", err);
-                    exit(1);
+                    e_exit();
                 }
             } else {
                 if let Err(err) = move_file(
@@ -280,15 +283,14 @@ fn main() {
                 ) {
                     e_printf!("Failed to move directory\n");
                     ev!("Error: {}\n", err);
-                    exit(1);
+                    e_exit();
                 }
-
             }
         }
         if let Err(err) = fs_extra::dir::remove(wk_directory.clone()) {
             e_printf!("Failed to remove directory\n");
             ev!("Error: {}\n", err);
-            exit(1);
+            e_exit();
         }
     }
 }
